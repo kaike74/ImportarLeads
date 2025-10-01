@@ -60,8 +60,8 @@ exports.handler = async (event) => {
       defval: ''
     });
 
-    const rows = data.slice(1);
-    console.log('Total de linhas:', rows.length);
+    const rows = data.slice(1, 1001); // Máximo 1000 linhas (ignora cabeçalho)
+console.log('Total de linhas (limitado a 1000):', rows.length);
     
     let imported = 0;
     let skipped = 0;
