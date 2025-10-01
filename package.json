@@ -1,6 +1,7 @@
 {
   "name": "import-leads-notion",
   "version": "1.0.0",
+  "description": "Importar leads do Excel para Notion",
   "dependencies": {
     "@notionhq/client": "^2.2.15",
     "xlsx": "^0.18.5",
