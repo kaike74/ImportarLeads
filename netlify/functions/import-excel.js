@@ -17,46 +17,29 @@ exports.handler = async (event) => {
   }
 
   try {
-    // VALIDAR VARIÁVEIS DE AMBIENTE
     console.log('Token existe?', !!process.env.NOTION_TOKEN);
     console.log('Database ID:', process.env.NOTION_DATABASE_ID);
     
-    if (!process.env.NOTION_TOKEN) {
-      console.error('ERRO: NOTION_TOKEN não configurado!');
+    if (!process.env.NOTION_TOKEN || !process.env.NOTION_DATABASE_ID) {
       return {
         statusCode: 500,
         headers,
-        body: JSON.stringify({ 
-          error: 'Variável NOTION_TOKEN não configurada no Netlify' 
-        })
-      };
-    }
-    
-    if (!process.env.NOTION_DATABASE_ID) {
-      console.error('ERRO: NOTION_DATABASE_ID não configurado!');
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ 
-          error: 'Variável NOTION_DATABASE_ID não configurada no Netlify' 
-        })
+        body: JSON.stringify({ error: 'Variáveis de ambiente não configuradas' })
       };
     }
 
-    // Inicializar Notion
     const notion = new Client({ auth: process.env.NOTION_TOKEN });
     const DATABASE_ID = process.env.NOTION_DATABASE_ID;
     
     console.log('Notion client inicializado');
 
-    // Parse do arquivo
+    // Parse arquivo
     console.log('Parseando multipart...');
     const boundary = multipart.getBoundary(event.headers['content-type']);
     const parts = multipart.parse(Buffer.from(event.body, 'base64'), boundary);
     
     const filePart = parts.find(part => part.name === 'file');
     if (!filePart) {
-      console.error('Arquivo não encontrado no upload');
       return {
         statusCode: 400,
         headers,
@@ -77,14 +60,13 @@ exports.handler = async (event) => {
       defval: ''
     });
 
-    const rows = data.slice(1); // Pula cabeçalho
-    console.log('Total de linhas (sem cabeçalho):', rows.length);
+    const rows = data.slice(1);
+    console.log('Total de linhas:', rows.length);
     
     let imported = 0;
     let skipped = 0;
     let errors = [];
 
-    // Processar linha por linha
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       
@@ -95,7 +77,6 @@ exports.handler = async (event) => {
         const telefone2 = row.N?.toString().trim() || '';
         const email = row.O?.toString().trim() || '';
 
-        // Pula linhas vazias
         if (!cnpj && !empresa) {
           skipped++;
           continue;
@@ -103,7 +84,6 @@ exports.handler = async (event) => {
 
         console.log(`Linha ${i + 2}: ${empresa || cnpj}`);
 
-        // Limpar telefones
         const cleanPhone = (phone) => {
           if (!phone) return null;
           const cleaned = phone.replace(/\D/g, '');
@@ -113,29 +93,39 @@ exports.handler = async (event) => {
         const tel1 = cleanPhone(telefone1);
         const tel2 = cleanPhone(telefone2);
 
-        // Criar no Notion
+        // FORMATO CORRETO PARA NOTION
+        const properties = {
+          'Empresa': {
+            title: [{ text: { content: empresa } }]  // CORRIGIDO: title ao invés de rich_text
+          },
+          'Status': {
+            status: { name: 'Entrada' }  // CORRIGIDO: status ao invés de select
+          }
+        };
+
+        // Adicionar CNPJ se existir
+        if (cnpj) {
+          properties['CNPJ'] = {
+            rich_text: [{ text: { content: cnpj } }]
+          };
+        }
+
+        // Adicionar telefones se existirem
+        if (tel1) {
+          properties['Telefone'] = { phone_number: tel1 };
+        }
+        if (tel2) {
+          properties['Telefone 2'] = { phone_number: tel2 };
+        }
+
+        // Adicionar email se existir
+        if (email) {
+          properties['Email'] = { email: email };
+        }
+
         await notion.pages.create({
           parent: { database_id: DATABASE_ID },
-          properties: {
-            'CNPJ': {
-              rich_text: [{ text: { content: cnpj } }]
-            },
-            'Empresa': {
-              rich_text: [{ text: { content: empresa } }]
-            },
-            'Telefone': tel1 ? {
-              phone_number: tel1
-            } : { phone_number: null },
-            'Telefone 2': tel2 ? {
-              phone_number: tel2
-            } : { phone_number: null },
-            'Email': email ? {
-              email: email
-            } : { email: null },
-            'Status': {
-              select: { name: 'Entrada' }
-            }
-          }
+          properties: properties
         });
 
         imported++;
@@ -145,7 +135,6 @@ exports.handler = async (event) => {
         console.error(`✗ Erro na linha ${i + 2}:`, error.message);
         errors.push(`Linha ${i + 2}: ${error.message}`);
         
-        // Continua mesmo com erro
         if (errors.length > 10) {
           console.log('Muitos erros, parando...');
           break;
@@ -165,21 +154,19 @@ exports.handler = async (event) => {
         success: true,
         imported,
         skipped,
-        errors: errors.slice(0, 5) // Primeiros 5 erros
+        errors: errors.length > 0 ? errors.slice(0, 5) : undefined
       })
     };
 
   } catch (error) {
     console.error('ERRO FATAL:', error);
-    console.error('Stack:', error.stack);
     
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
         success: false,
-        error: error.message,
-        details: error.stack
+        error: error.message
       })
     };
   }
